@@ -95,14 +95,33 @@ class ImageDownloader:
         Download multiple images. Returns list of local file paths.
 
         Skips URLs that fail to download (logs the error, continues).
+        Prints a summary warning if any downloads failed.
         """
         paths = []
+        failed = []
         for url in urls:
             try:
                 path = self.download(url)
                 paths.append(path)
             except Exception as e:
                 print(f"[image_downloader] Failed to download {url}: {e}", file=sys.stderr)
+                failed.append(url)
+
+        if failed:
+            print(
+                f"\n[image_downloader] WARNING: {len(failed)}/{len(urls)} "
+                f"image(s) failed to download:",
+                file=sys.stderr,
+            )
+            for url in failed:
+                print(f"  - {url}", file=sys.stderr)
+            if paths:
+                print(
+                    f"[image_downloader] Continuing with {len(paths)} "
+                    f"successfully downloaded image(s).",
+                    file=sys.stderr,
+                )
+
         return paths
 
     def cleanup(self):

@@ -50,7 +50,7 @@ if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
 from chrome_launcher import ensure_chrome, restart_chrome
-from cdp_publish import XiaohongshuPublisher, CDPError
+from cdp_publish import XiaohongshuPublisher, CDPError, MAX_TITLE_LENGTH, xhs_title_length
 from image_downloader import ImageDownloader
 
 
@@ -131,6 +131,16 @@ def main():
         print("Error: title is empty.", file=sys.stderr)
         sys.exit(2)
 
+    title_len = xhs_title_length(title)
+    if title_len > MAX_TITLE_LENGTH:
+        print(
+            f"Error: title exceeds {MAX_TITLE_LENGTH}-char limit "
+            f"({title_len} XHS-chars). "
+            f"Tip: CJK chars count as 1, ASCII chars count as 0.5.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
     # --- Resolve content ---
     if args.content_file:
         with open(args.content_file, encoding="utf-8") as f:
@@ -153,6 +163,7 @@ def main():
     # --- Step 2: Connect and check login ---
     print("[pipeline] Step 2: Checking login status...")
     publisher = XiaohongshuPublisher()
+    downloader = None
     try:
         publisher.connect()
         logged_in = publisher.check_login()
@@ -166,38 +177,33 @@ def main():
                 publisher.open_login_page()
             print("NOT_LOGGED_IN")
             sys.exit(1)
-    except CDPError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(2)
 
-    # --- Step 3: Prepare images ---
-    image_paths = []
-    downloader = None
+        # --- Step 3: Prepare images ---
+        image_paths = []
 
-    if args.image_urls:
-        print(f"[pipeline] Step 3: Downloading {len(args.image_urls)} image(s)...")
-        downloader = ImageDownloader(temp_dir=args.temp_dir)
-        image_paths = downloader.download_all(args.image_urls)
-        if not image_paths:
-            print("Error: All image downloads failed.", file=sys.stderr)
-            sys.exit(2)
-    elif args.images:
-        image_paths = args.images
-        # Verify local files exist
-        for p in image_paths:
-            if not os.path.isfile(p):
-                print(f"Error: Image file not found: {p}", file=sys.stderr)
+        if args.image_urls:
+            print(f"[pipeline] Step 3: Downloading {len(args.image_urls)} image(s)...")
+            downloader = ImageDownloader(temp_dir=args.temp_dir)
+            image_paths = downloader.download_all(args.image_urls)
+            if not image_paths:
+                print("Error: All image downloads failed.", file=sys.stderr)
                 sys.exit(2)
-        print(f"[pipeline] Step 3: Using {len(image_paths)} local image(s).")
-    elif args.mode == "image-text":
-        print("Error: Images are required for image-text mode. Use --image-urls or --images.", file=sys.stderr)
-        sys.exit(2)
-    else:
-        print("[pipeline] Step 3: No images (optional for long-article mode).")
+        elif args.images:
+            image_paths = args.images
+            # Verify local files exist
+            for p in image_paths:
+                if not os.path.isfile(p):
+                    print(f"Error: Image file not found: {p}", file=sys.stderr)
+                    sys.exit(2)
+            print(f"[pipeline] Step 3: Using {len(image_paths)} local image(s).")
+        elif args.mode == "image-text":
+            print("Error: Images are required for image-text mode. Use --image-urls or --images.", file=sys.stderr)
+            sys.exit(2)
+        else:
+            print("[pipeline] Step 3: No images (optional for long-article mode).")
 
-    # --- Step 4: Fill form ---
-    print("[pipeline] Step 4: Filling form...")
-    try:
+        # --- Step 4: Fill form ---
+        print("[pipeline] Step 4: Filling form...")
         if args.mode == "long-article":
             publisher.publish_long_article(
                 title=title,
@@ -208,30 +214,22 @@ def main():
         else:
             publisher.publish(title=title, content=content, image_paths=image_paths)
             print("FILL_STATUS: READY_TO_PUBLISH")
-    except CDPError as e:
-        print(f"Error during form fill: {e}", file=sys.stderr)
-        if downloader:
-            downloader.cleanup()
-        sys.exit(2)
 
-    # --- Step 5: Publish (optional, image-text mode only) ---
-    if args.auto_publish and args.mode == "image-text":
-        print("[pipeline] Step 5: Clicking publish button...")
-        try:
+        # --- Step 5: Publish (optional, image-text mode only) ---
+        if args.auto_publish and args.mode == "image-text":
+            print("[pipeline] Step 5: Clicking publish button...")
             publisher._click_publish()
             print("PUBLISH_STATUS: PUBLISHED")
-        except CDPError as e:
-            print(f"Error clicking publish: {e}", file=sys.stderr)
-            if downloader:
-                downloader.cleanup()
-            sys.exit(2)
 
-    # --- Cleanup ---
-    publisher.disconnect()
-    if downloader:
-        downloader.cleanup()
+        print("[pipeline] Done.")
 
-    print("[pipeline] Done.")
+    except CDPError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(2)
+    finally:
+        publisher.disconnect()
+        if downloader:
+            downloader.cleanup()
 
 
 if __name__ == "__main__":

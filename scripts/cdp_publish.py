@@ -11,6 +11,7 @@ CLI usage:
     python cdp_publish.py publish --title "标题" --content "正文" --images img1.jpg [--headless] [--account NAME]
     python cdp_publish.py click-publish [--headless] [--account NAME]
 
+
     # Long article mode
     python cdp_publish.py long-article --title "标题" --content "正文" [--images img1.jpg] [--account NAME]
     python cdp_publish.py click-next-step [--account NAME]
@@ -37,6 +38,7 @@ Library usage:
 """
 
 import json
+import math
 import os
 import time
 import sys
@@ -102,6 +104,20 @@ ACTION_INTERVAL = 1  # seconds between actions
 AUTO_FORMAT_WAIT = 5  # seconds to wait after clicking auto-format
 TEMPLATE_WAIT = 10  # seconds max to wait for template cards to appear
 
+# Xiaohongshu title length limit.
+# XHS counts CJK/full-width chars as 1, ASCII/half-width chars as 0.5.
+MAX_TITLE_LENGTH = 20
+
+
+def xhs_title_length(title: str) -> int:
+    """Calculate title length the way Xiaohongshu does.
+
+    CJK / full-width characters count as 1, ASCII / half-width as 0.5.
+    Result is rounded up (ceil).
+    """
+    length = sum(1 if ord(c) > 127 else 0.5 for c in title)
+    return math.ceil(length)
+
 
 class CDPError(Exception):
     """Error communicating with Chrome via CDP."""
@@ -137,8 +153,16 @@ class XiaohongshuPublisher:
                 else:
                     raise CDPError(f"Cannot reach Chrome on {self.host}:{self.port}: {e}")
 
-    def _find_or_create_tab(self, target_url_prefix: str = "") -> str:
-        """Find an existing tab matching the URL prefix, or return the first page tab."""
+    def _find_or_create_tab(
+        self, target_url_prefix: str = "", create_new: bool = True,
+    ) -> str:
+        """Find an existing tab matching the URL prefix, or create/reuse one.
+
+        Args:
+            target_url_prefix: If set, look for a tab whose URL starts with this.
+            create_new: If True (default), create a new tab when no match is found.
+                If False, reuse the first available page tab instead.
+        """
         targets = self._get_targets()
         pages = [t for t in targets if t.get("type") == "page"]
 
@@ -146,6 +170,10 @@ class XiaohongshuPublisher:
             for t in pages:
                 if t.get("url", "").startswith(target_url_prefix):
                     return t["webSocketDebuggerUrl"]
+
+        # Reuse existing tab when create_new is False
+        if not create_new and pages:
+            return pages[0]["webSocketDebuggerUrl"]
 
         # Create a new tab
         resp = requests.put(
@@ -161,9 +189,19 @@ class XiaohongshuPublisher:
 
         raise CDPError("No browser tabs available.")
 
-    def connect(self, target_url_prefix: str = ""):
-        """Connect to a Chrome tab via WebSocket."""
-        ws_url = self._find_or_create_tab(target_url_prefix)
+    def connect(
+        self,
+        target_url_prefix: str = "",
+        create_new: bool = True,
+    ):
+        """Connect to a Chrome tab via WebSocket.
+
+        Args:
+            target_url_prefix: Look for a tab whose URL starts with this.
+            create_new: If True, create a new tab when no match found.
+                If False, reuse an existing tab.
+        """
+        ws_url = self._find_or_create_tab(target_url_prefix, create_new=create_new)
         if not ws_url:
             raise CDPError("Could not obtain WebSocket URL for any tab.")
 
@@ -367,6 +405,12 @@ class XiaohongshuPublisher:
 
     def _fill_title(self, title: str):
         """Fill in the article title."""
+        title_len = xhs_title_length(title)
+        if title_len > MAX_TITLE_LENGTH:
+            raise CDPError(
+                f"Title exceeds {MAX_TITLE_LENGTH}-char limit "
+                f"({title_len} XHS-chars): {title}"
+            )
         print(f"[cdp_publish] Setting title: {title[:40]}...")
         time.sleep(ACTION_INTERVAL)
 
@@ -527,6 +571,12 @@ class XiaohongshuPublisher:
 
     def _fill_long_title(self, title: str):
         """Fill in the long article title (textarea element)."""
+        title_len = xhs_title_length(title)
+        if title_len > MAX_TITLE_LENGTH:
+            raise CDPError(
+                f"Title exceeds {MAX_TITLE_LENGTH}-char limit "
+                f"({title_len} XHS-chars): {title}"
+            )
         print(f"[cdp_publish] Setting long article title: {title[:40]}...")
         time.sleep(ACTION_INTERVAL)
 
@@ -822,7 +872,7 @@ def main():
 
     parser = argparse.ArgumentParser(description="Xiaohongshu CDP Publisher")
     parser.add_argument("--headless", action="store_true",
-                        help="Use headless Chrome (no GUI window)")
+                        help="Run Chrome in headless mode (default is headed with GUI)")
     parser.add_argument("--account", help="Account name to use (default: default account)")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -955,11 +1005,20 @@ def main():
             if not logged_in and headless:
                 print(
                     "[cdp_publish] Headless mode: cannot scan QR code.\n"
-                    "  Run with 'login' command or without --headless to log in."
+                    "  Run with 'login' command (without --headless) to log in."
                 )
             sys.exit(0 if logged_in else 1)
 
         elif args.command in ("fill", "publish"):
+            title_len = xhs_title_length(args.title)
+            if title_len > MAX_TITLE_LENGTH:
+                print(
+                    f"Error: title exceeds {MAX_TITLE_LENGTH}-char limit "
+                    f"({title_len} XHS-chars).",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+
             content = args.content
             if args.content_file:
                 with open(args.content_file, encoding="utf-8") as f:
@@ -983,6 +1042,14 @@ def main():
                     title = f.read().strip()
             if not title:
                 print("Error: --title or --title-file required.", file=sys.stderr)
+                sys.exit(1)
+            title_len = xhs_title_length(title)
+            if title_len > MAX_TITLE_LENGTH:
+                print(
+                    f"Error: title exceeds {MAX_TITLE_LENGTH}-char limit "
+                    f"({title_len} XHS-chars).",
+                    file=sys.stderr,
+                )
                 sys.exit(1)
 
             content = args.content
