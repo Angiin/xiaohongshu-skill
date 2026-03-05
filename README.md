@@ -1,3 +1,7 @@
+# 项目迁移
+
+本项目已迁移新的 [xiaohongshu-skills](https://github.com/autoclaw-cc/xiaohongshu-skills）提供与 xiaohongshu-mcp 同等的体验，使用更丝滑，功能更加完善。
+
 # xiaohongshu-skill
 
 自动发布、搜索和提取小红书（Xiaohongshu/RED）内容的命令行工具。
