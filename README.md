@@ -1,6 +1,6 @@
 # 项目迁移
 
-本项目已迁移新的 [xiaohongshu-skills](https://github.com/autoclaw-cc/xiaohongshu-skills) 提供与 xiaohongshu-mcp 同等的体验，使用更丝滑，功能更加完善。
+本项目已迁移至新的 [xiaohongshu-skills](https://github.com/autoclaw-cc/xiaohongshu-skills) 提供与 xiaohongshu-mcp 同等的体验，使用更丝滑，功能更加完善。
 
 # xiaohongshu-skill
 
